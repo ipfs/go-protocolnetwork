@@ -1,8 +1,9 @@
-package network
+package protocolnetwork
 
 import (
 	"sync"
 
+	logging "github.com/ipfs/go-log/v2"
 	"github.com/libp2p/go-libp2p/core/peer"
 )
 
@@ -24,10 +25,10 @@ type connectEventManager struct {
 	lk            sync.RWMutex
 	cond          sync.Cond
 	peers         map[peer.ID]*peerState
-
-	changeQueue []peer.ID
-	stop        bool
-	done        chan struct{}
+	log           *logging.ZapEventLogger
+	changeQueue   []peer.ID
+	stop          bool
+	done          chan struct{}
 }
 
 type peerState struct {
@@ -105,7 +106,7 @@ func (c *connectEventManager) worker() {
 			// This shouldn't be possible because _this_ thread is responsible for
 			// removing peers from this map, and we shouldn't get duplicate entries in
 			// the change queue.
-			log.Error("a change was enqueued for a peer we're not tracking")
+			c.log.Error("a change was enqueued for a peer we're not tracking")
 			continue
 		}
 

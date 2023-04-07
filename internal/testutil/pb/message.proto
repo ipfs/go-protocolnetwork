@@ -1,0 +1,10 @@
+syntax = "proto3";
+
+package message.pb;
+
+option go_package = ".;message_pb";
+
+message Message {
+  bytes Id    = 1; 
+  bytes Payload = 2;
+}

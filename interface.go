@@ -1,67 +1,64 @@
-package network
+package protocolnetwork
 
 import (
 	"context"
+	"io"
 	"time"
 
-	bsmsg "github.com/ipfs/boxo/bitswap/message"
-	"github.com/ipfs/boxo/bitswap/network/internal"
-
-	cid "github.com/ipfs/go-cid"
-
-	"github.com/libp2p/go-libp2p/core/connmgr"
+	logging "github.com/ipfs/go-log/v2"
 	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/libp2p/go-libp2p/core/protocol"
 	"github.com/libp2p/go-libp2p/p2p/protocol/ping"
+
+	msgio "github.com/libp2p/go-msgio"
 )
 
-var (
-	// ProtocolBitswapNoVers is equivalent to the legacy bitswap protocol
-	ProtocolBitswapNoVers = internal.ProtocolBitswapNoVers
-	// ProtocolBitswapOneZero is the prefix for the legacy bitswap protocol
-	ProtocolBitswapOneZero = internal.ProtocolBitswapOneZero
-	// ProtocolBitswapOneOne is the the prefix for version 1.1.0
-	ProtocolBitswapOneOne = internal.ProtocolBitswapOneOne
-	// ProtocolBitswap is the current version of the bitswap protocol: 1.2.0
-	ProtocolBitswap = internal.ProtocolBitswap
-)
+type Message interface {
+	Log(logger *logging.ZapEventLogger, eventDescription string)
+	SendTimeout() time.Duration
+}
 
-// BitSwapNetwork provides network connectivity for BitSwap sessions.
-type BitSwapNetwork interface {
-	Self() peer.ID
+// ProtocolNetwork provides network connectivity for BitSwap sessions.
+type ProtocolNetwork[MessageType Message] interface {
 
 	// SendMessage sends a BitSwap message to a peer.
 	SendMessage(
 		context.Context,
 		peer.ID,
-		bsmsg.BitSwapMessage) error
+		MessageType) error
 
 	// Start registers the Reciver and starts handling new messages, connectivity events, etc.
-	Start(...Receiver)
+	Start(...Receiver[MessageType])
 	// Stop stops the network service.
 	Stop()
 
 	ConnectTo(context.Context, peer.ID) error
 	DisconnectFrom(context.Context, peer.ID) error
 
-	NewMessageSender(context.Context, peer.ID, *MessageSenderOpts) (MessageSender, error)
-
-	ConnectionManager() connmgr.ConnManager
+	NewMessageSender(context.Context, peer.ID, *MessageSenderOpts) (MessageSender[MessageType], error)
 
 	Stats() Stats
+}
 
-	Routing
+type MessageHandlerSelector[MessageType Message] interface {
+	Select(protocol protocol.ID) MessageHandler[MessageType]
+}
 
-	Pinger
+// MessageHandler provides a consistent interface for maintaining per-peer state
+// within the differnet protocol versions
+type MessageHandler[MessageType Message] interface {
+	FromNet(peer.ID, io.Reader) (MessageType, error)
+	FromMsgReader(peer.ID, msgio.Reader) (MessageType, error)
+	ToNet(peer.ID, MessageType, io.Writer) error
 }
 
 // MessageSender is an interface for sending a series of messages over the bitswap
 // network
-type MessageSender interface {
-	SendMsg(context.Context, bsmsg.BitSwapMessage) error
+type MessageSender[MessageType Message] interface {
+	SendMsg(context.Context, MessageType) error
 	Close() error
 	Reset() error
-	// Indicates whether the remote peer supports HAVE / DONT_HAVE messages
-	SupportsHave() bool
+	Protocol() protocol.ID
 }
 
 type MessageSenderOpts struct {
@@ -71,27 +68,17 @@ type MessageSenderOpts struct {
 }
 
 // Receiver is an interface that can receive messages from the BitSwapNetwork.
-type Receiver interface {
+type Receiver[MessageType Message] interface {
 	ReceiveMessage(
 		ctx context.Context,
 		sender peer.ID,
-		incoming bsmsg.BitSwapMessage)
+		incoming MessageType)
 
 	ReceiveError(error)
 
 	// Connected/Disconnected warns bitswap about peer connections.
 	PeerConnected(peer.ID)
 	PeerDisconnected(peer.ID)
-}
-
-// Routing is an interface to providing and finding providers on a bitswap
-// network.
-type Routing interface {
-	// FindProvidersAsync returns a channel of providers for the given key.
-	FindProvidersAsync(context.Context, cid.Cid, int) <-chan peer.ID
-
-	// Provide provides the key to the network.
-	Provide(context.Context, cid.Cid) error
 }
 
 // Pinger is an interface to ping a peer and get the average latency of all pings

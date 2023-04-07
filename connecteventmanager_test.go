@@ -1,12 +1,11 @@
-package network
+package protocolnetwork
 
 import (
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/ipfs/boxo/bitswap/internal/testutil"
-	"github.com/ipfs/boxo/internal/test"
+	"github.com/ipfs/go-protocolnetwork/internal/testutil"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/stretchr/testify/require"
 )
@@ -46,7 +45,7 @@ func wait(t *testing.T, c *connectEventManager) {
 }
 
 func TestConnectEventManagerConnectDisconnect(t *testing.T) {
-	test.Flaky(t)
+	testutil.Flaky(t)
 
 	connListener := newMockConnListener()
 	peers := testutil.GeneratePeers(2)
@@ -87,7 +86,7 @@ func TestConnectEventManagerConnectDisconnect(t *testing.T) {
 }
 
 func TestConnectEventManagerMarkUnresponsive(t *testing.T) {
-	test.Flaky(t)
+	testutil.Flaky(t)
 
 	connListener := newMockConnListener()
 	p := testutil.GeneratePeers(1)[0]
@@ -138,7 +137,7 @@ func TestConnectEventManagerMarkUnresponsive(t *testing.T) {
 }
 
 func TestConnectEventManagerDisconnectAfterMarkUnresponsive(t *testing.T) {
-	test.Flaky(t)
+	testutil.Flaky(t)
 
 	connListener := newMockConnListener()
 	p := testutil.GeneratePeers(1)[0]

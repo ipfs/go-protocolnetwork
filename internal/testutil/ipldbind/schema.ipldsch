@@ -1,0 +1,6 @@
+type MessageID bytes
+type Data bytes
+type Message struct {
+  id                  MessageID   (rename "id")   # unique id set on the requester side
+  payload                Data        (rename "dt")   # payload
+} representation map
