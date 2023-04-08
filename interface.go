@@ -13,13 +13,14 @@ import (
 	msgio "github.com/libp2p/go-msgio"
 )
 
-type Message interface {
+type Message[MessageType any] interface {
 	Log(logger *logging.ZapEventLogger, eventDescription string)
 	SendTimeout() time.Duration
+	Clone() MessageType
 }
 
 // ProtocolNetwork provides network connectivity for BitSwap sessions.
-type ProtocolNetwork[MessageType Message] interface {
+type ProtocolNetwork[MessageType Message[MessageType]] interface {
 
 	// SendMessage sends a BitSwap message to a peer.
 	SendMessage(
@@ -49,13 +50,13 @@ type ConnManager interface {
 	Unprotect(peer.ID, string) bool
 }
 
-type MessageHandlerSelector[MessageType Message] interface {
+type MessageHandlerSelector[MessageType Message[MessageType]] interface {
 	Select(protocol protocol.ID) MessageHandler[MessageType]
 }
 
 // MessageHandler provides a consistent interface for maintaining per-peer state
 // within the differnet protocol versions
-type MessageHandler[MessageType Message] interface {
+type MessageHandler[MessageType Message[MessageType]] interface {
 	FromNet(peer.ID, io.Reader) (MessageType, error)
 	FromMsgReader(peer.ID, msgio.Reader) (MessageType, error)
 	ToNet(peer.ID, MessageType, io.Writer) error
@@ -63,7 +64,7 @@ type MessageHandler[MessageType Message] interface {
 
 // MessageSender is an interface for sending a series of messages over the bitswap
 // network
-type MessageSender[MessageType Message] interface {
+type MessageSender[MessageType Message[MessageType]] interface {
 	SendMsg(context.Context, MessageType) error
 	Close() error
 	Reset() error
@@ -77,7 +78,7 @@ type MessageSenderOpts struct {
 }
 
 // Receiver is an interface that can receive messages from the BitSwapNetwork.
-type Receiver[MessageType Message] interface {
+type Receiver[MessageType Message[MessageType]] interface {
 	ReceiveMessage(
 		ctx context.Context,
 		sender peer.ID,

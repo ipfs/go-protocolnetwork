@@ -28,7 +28,7 @@ var sendLatency = 2 * time.Second
 var minSendRate = (100 * 1000) / 8 // 100kbit/s
 
 // NewFromLibp2pHost returns a BitSwapNetwork supported by underlying IPFS host.
-func NewFromLibp2pHost[MessageType Message](
+func NewFromLibp2pHost[MessageType Message[MessageType]](
 	protocolName string,
 	host host.Host,
 	messageHandlerSelector MessageHandlerSelector[MessageType],
@@ -53,7 +53,7 @@ func NewFromLibp2pHost[MessageType Message](
 
 // libp2pProtocolNetwork transforms the ipfs network interface, which sends and receives
 // NetMessage objects, into the bitswap network interface.
-type libp2pProtocolNetwork[MessageType Message] struct {
+type libp2pProtocolNetwork[MessageType Message[MessageType]] struct {
 	// NOTE: Stats must be at the top of the heap allocation to ensure 64bit
 	// alignment.
 	stats Stats
@@ -72,7 +72,7 @@ type libp2pProtocolNetwork[MessageType Message] struct {
 	receivers []Receiver[MessageType]
 }
 
-type streamMessageSender[MessageType Message] struct {
+type streamMessageSender[MessageType Message[MessageType]] struct {
 	to        peer.ID
 	stream    network.Stream
 	connected bool
@@ -380,7 +380,7 @@ func (bsnet *libp2pProtocolNetwork[MessageType]) Stats() Stats {
 	}
 }
 
-type netNotifiee[MessageType Message] libp2pProtocolNetwork[MessageType]
+type netNotifiee[MessageType Message[MessageType]] libp2pProtocolNetwork[MessageType]
 
 func (nn *netNotifiee[MessageType]) impl() *libp2pProtocolNetwork[MessageType] {
 	return (*libp2pProtocolNetwork[MessageType])(nn)

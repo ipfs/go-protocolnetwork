@@ -1,7 +1,7 @@
-package bitswap
+package testnet
 
 import (
-	bsnet "github.com/ipfs/boxo/bitswap/network"
+	"github.com/ipfs/go-protocolnetwork"
 
 	tnet "github.com/libp2p/go-libp2p-testing/net"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -9,8 +9,7 @@ import (
 
 // Network is an interface for generating bitswap network interfaces
 // based on a test network.
-type Network interface {
-	Adapter(tnet.Identity, ...bsnet.NetOpt) bsnet.BitSwapNetwork
-
+type Network[MessageType protocolnetwork.Message[MessageType]] interface {
+	Adapter(tnet.Identity, ...protocolnetwork.NetOpt) protocolnetwork.ProtocolNetwork[MessageType]
 	HasPeer(peer.ID) bool
 }

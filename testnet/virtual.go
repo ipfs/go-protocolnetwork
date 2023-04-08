@@ -1,6 +1,7 @@
-package bitswap
+package testnet
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"sort"
@@ -8,12 +9,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	bsmsg "github.com/ipfs/boxo/bitswap/message"
-	bsnet "github.com/ipfs/boxo/bitswap/network"
-
-	mockrouting "github.com/ipfs/boxo/routing/mock"
-	cid "github.com/ipfs/go-cid"
 	delay "github.com/ipfs/go-ipfs-delay"
+	"github.com/ipfs/go-protocolnetwork"
 
 	tnet "github.com/libp2p/go-libp2p-testing/net"
 	"github.com/libp2p/go-libp2p/core/connmgr"
@@ -26,15 +23,20 @@ import (
 
 // VirtualNetwork generates a new testnet instance - a fake network that
 // is used to simulate sending messages.
-func VirtualNetwork(rs mockrouting.Server, d delay.D) Network {
-	return &network{
+func VirtualNetwork[MessageType protocolnetwork.Message[MessageType]](
+	d delay.D,
+	supportedProtocols []protocol.ID,
+	handler protocolnetwork.MessageHandler[MessageType],
+) Network[MessageType] {
+	return &network[MessageType]{
 		latencies:          make(map[peer.ID]map[peer.ID]time.Duration),
-		clients:            make(map[peer.ID]*receiverQueue),
+		clients:            make(map[peer.ID]*receiverQueue[MessageType]),
 		delay:              d,
-		routingserver:      rs,
 		isRateLimited:      false,
 		rateLimitGenerator: nil,
 		conns:              make(map[string]struct{}),
+		supportedProtocols: supportedProtocols,
+		handler:            handler,
 	}
 }
 
@@ -45,74 +47,75 @@ type RateLimitGenerator interface {
 
 // RateLimitedVirtualNetwork generates a testnet instance where nodes are rate
 // limited in the upload/download speed.
-func RateLimitedVirtualNetwork(rs mockrouting.Server, d delay.D, rateLimitGenerator RateLimitGenerator) Network {
-	return &network{
+func RateLimitedVirtualNetwork[MessageType protocolnetwork.Message[MessageType]](
+	d delay.D,
+	rateLimitGenerator RateLimitGenerator,
+	supportedProtocols []protocol.ID,
+	handler protocolnetwork.MessageHandler[MessageType],
+) Network[MessageType] {
+	return &network[MessageType]{
 		latencies:          make(map[peer.ID]map[peer.ID]time.Duration),
 		rateLimiters:       make(map[peer.ID]map[peer.ID]*mocknet.RateLimiter),
-		clients:            make(map[peer.ID]*receiverQueue),
+		clients:            make(map[peer.ID]*receiverQueue[MessageType]),
 		delay:              d,
-		routingserver:      rs,
 		isRateLimited:      true,
 		rateLimitGenerator: rateLimitGenerator,
 		conns:              make(map[string]struct{}),
+		supportedProtocols: supportedProtocols,
+		handler:            handler,
 	}
 }
 
-type network struct {
+type network[MessageType protocolnetwork.Message[MessageType]] struct {
 	mu                 sync.Mutex
 	latencies          map[peer.ID]map[peer.ID]time.Duration
 	rateLimiters       map[peer.ID]map[peer.ID]*mocknet.RateLimiter
-	clients            map[peer.ID]*receiverQueue
-	routingserver      mockrouting.Server
+	clients            map[peer.ID]*receiverQueue[MessageType]
 	delay              delay.D
 	isRateLimited      bool
 	rateLimitGenerator RateLimitGenerator
 	conns              map[string]struct{}
+	supportedProtocols []protocol.ID
+	handler            protocolnetwork.MessageHandler[MessageType]
 }
 
-type message struct {
+type message[MessageType protocolnetwork.Message[MessageType]] struct {
 	from       peer.ID
-	msg        bsmsg.BitSwapMessage
+	msg        MessageType
 	shouldSend time.Time
 }
 
 // receiverQueue queues up a set of messages to be sent, and sends them *in
 // order* with their delays respected as much as sending them in order allows
 // for
-type receiverQueue struct {
-	receiver *networkClient
-	queue    []*message
+type receiverQueue[MessageType protocolnetwork.Message[MessageType]] struct {
+	receiver *networkClient[MessageType]
+	queue    []*message[MessageType]
 	active   bool
 	lk       sync.Mutex
 }
 
-func (n *network) Adapter(p tnet.Identity, opts ...bsnet.NetOpt) bsnet.BitSwapNetwork {
+func (n *network[MessageType]) Adapter(p tnet.Identity, opts ...protocolnetwork.NetOpt) protocolnetwork.ProtocolNetwork[MessageType] {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 
-	s := bsnet.Settings{
-		SupportedProtocols: []protocol.ID{
-			bsnet.ProtocolBitswap,
-			bsnet.ProtocolBitswapOneOne,
-			bsnet.ProtocolBitswapOneZero,
-			bsnet.ProtocolBitswapNoVers,
-		},
+	s := protocolnetwork.Settings{
+		SupportedProtocols: n.supportedProtocols,
 	}
 	for _, opt := range opts {
 		opt(&s)
 	}
 
-	client := &networkClient{
+	client := &networkClient[MessageType]{
 		local:              p.ID(),
 		network:            n,
-		routing:            n.routingserver.Client(p),
 		supportedProtocols: s.SupportedProtocols,
 	}
-	n.clients[p.ID()] = &receiverQueue{receiver: client}
+	n.clients[p.ID()] = &receiverQueue[MessageType]{receiver: client}
 	return client
 }
 
-func (n *network) HasPeer(p peer.ID) bool {
+func (n *network[MessageType]) HasPeer(p peer.ID) bool {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 
@@ -122,11 +125,11 @@ func (n *network) HasPeer(p peer.ID) bool {
 
 // TODO should this be completely asynchronous?
 // TODO what does the network layer do with errors received from services?
-func (n *network) SendMessage(
+func (n *network[MessageType]) SendMessage(
 	ctx context.Context,
 	from peer.ID,
 	to peer.ID,
-	mes bsmsg.BitSwapMessage) error {
+	mes MessageType) error {
 
 	mes = mes.Clone()
 
@@ -159,7 +162,12 @@ func (n *network) SendMessage(
 			rateLimiters[to] = rateLimiter
 		}
 
-		size := mes.ToProtoV1().Size()
+		buf := new(bytes.Buffer)
+		err := n.handler.ToNet(peer.ID("foo"), mes, buf)
+		if err != nil {
+			return err
+		}
+		size := buf.Len()
 		bandwidthDelay = rateLimiter.Limit(size)
 	} else {
 		bandwidthDelay = 0
@@ -173,7 +181,7 @@ func (n *network) SendMessage(
 	// nb: terminate the context since the context wouldn't actually be passed
 	// over the network in a real scenario
 
-	msg := &message{
+	msg := &message[MessageType]{
 		from:       from,
 		msg:        mes,
 		shouldSend: time.Now().Add(latency).Add(bandwidthDelay),
@@ -183,60 +191,58 @@ func (n *network) SendMessage(
 	return nil
 }
 
-var _ bsnet.Receiver = (*networkClient)(nil)
-
-type networkClient struct {
+type networkClient[MessageType protocolnetwork.Message[MessageType]] struct {
 	// These need to be at the top of the struct (allocated on the heap) for alignment on 32bit platforms.
-	stats bsnet.Stats
+	stats protocolnetwork.Stats
 
 	local              peer.ID
-	receivers          []bsnet.Receiver
-	network            *network
+	receivers          []protocolnetwork.Receiver[MessageType]
+	network            *network[MessageType]
 	routing            routing.Routing
 	supportedProtocols []protocol.ID
 }
 
-func (nc *networkClient) ReceiveMessage(ctx context.Context, sender peer.ID, incoming bsmsg.BitSwapMessage) {
+func (nc *networkClient[MessageType]) ReceiveMessage(ctx context.Context, sender peer.ID, incoming MessageType) {
 	for _, v := range nc.receivers {
 		v.ReceiveMessage(ctx, sender, incoming)
 	}
 }
 
-func (nc *networkClient) ReceiveError(e error) {
+func (nc *networkClient[MessageType]) ReceiveError(p peer.ID, e error) {
 	for _, v := range nc.receivers {
-		v.ReceiveError(e)
+		v.ReceiveError(p, e)
 	}
 }
 
-func (nc *networkClient) PeerConnected(p peer.ID) {
+func (nc *networkClient[MessageType]) PeerConnected(p peer.ID) {
 	for _, v := range nc.receivers {
 		v.PeerConnected(p)
 	}
 }
-func (nc *networkClient) PeerDisconnected(p peer.ID) {
+func (nc *networkClient[MessageType]) PeerDisconnected(p peer.ID) {
 	for _, v := range nc.receivers {
 		v.PeerDisconnected(p)
 	}
 }
 
-func (nc *networkClient) Self() peer.ID {
+func (nc *networkClient[MessageType]) Self() peer.ID {
 	return nc.local
 }
 
-func (nc *networkClient) Ping(ctx context.Context, p peer.ID) ping.Result {
+func (nc *networkClient[MessageType]) Ping(ctx context.Context, p peer.ID) ping.Result {
 	return ping.Result{RTT: nc.Latency(p)}
 }
 
-func (nc *networkClient) Latency(p peer.ID) time.Duration {
+func (nc *networkClient[MessageType]) Latency(p peer.ID) time.Duration {
 	nc.network.mu.Lock()
 	defer nc.network.mu.Unlock()
 	return nc.network.latencies[nc.local][p]
 }
 
-func (nc *networkClient) SendMessage(
+func (nc *networkClient[MessageType]) SendMessage(
 	ctx context.Context,
 	to peer.ID,
-	message bsmsg.BitSwapMessage) error {
+	message MessageType) error {
 	if err := nc.network.SendMessage(ctx, nc.local, to, message); err != nil {
 		return err
 	}
@@ -244,75 +250,43 @@ func (nc *networkClient) SendMessage(
 	return nil
 }
 
-func (nc *networkClient) Stats() bsnet.Stats {
-	return bsnet.Stats{
+func (nc *networkClient[MessageType]) Stats() protocolnetwork.Stats {
+	return protocolnetwork.Stats{
 		MessagesRecvd: atomic.LoadUint64(&nc.stats.MessagesRecvd),
 		MessagesSent:  atomic.LoadUint64(&nc.stats.MessagesSent),
 	}
 }
 
-// FindProvidersAsync returns a channel of providers for the given key.
-func (nc *networkClient) FindProvidersAsync(ctx context.Context, k cid.Cid, max int) <-chan peer.ID {
-	// NB: this function duplicates the AddrInfo -> ID transformation in the
-	// bitswap network adapter. Not to worry. This network client will be
-	// deprecated once the ipfsnet.Mock is added. The code below is only
-	// temporary.
-
-	out := make(chan peer.ID)
-	go func() {
-		defer close(out)
-		providers := nc.routing.FindProvidersAsync(ctx, k, max)
-		for info := range providers {
-			select {
-			case <-ctx.Done():
-			case out <- info.ID:
-			}
-		}
-	}()
-	return out
-}
-
-func (nc *networkClient) ConnectionManager() connmgr.ConnManager {
+func (nc *networkClient[MessageType]) ConnectionManager() protocolnetwork.ConnManager {
 	return &connmgr.NullConnMgr{}
 }
 
-type messagePasser struct {
-	net    *networkClient
+type messagePasser[MessageType protocolnetwork.Message[MessageType]] struct {
+	net    *networkClient[MessageType]
 	target peer.ID
 	local  peer.ID
 	ctx    context.Context
 }
 
-func (mp *messagePasser) SendMsg(ctx context.Context, m bsmsg.BitSwapMessage) error {
+func (mp *messagePasser[MessageType]) SendMsg(ctx context.Context, m MessageType) error {
 	return mp.net.SendMessage(ctx, mp.target, m)
 }
 
-func (mp *messagePasser) Close() error {
+func (mp *messagePasser[MessageType]) Close() error {
 	return nil
 }
 
-func (mp *messagePasser) Reset() error {
+func (mp *messagePasser[MessageType]) Reset() error {
 	return nil
 }
 
-var oldProtos = map[protocol.ID]struct{}{
-	bsnet.ProtocolBitswapNoVers:  {},
-	bsnet.ProtocolBitswapOneZero: {},
-	bsnet.ProtocolBitswapOneOne:  {},
-}
-
-func (mp *messagePasser) SupportsHave() bool {
+func (mp *messagePasser[MessageType]) Protocol() protocol.ID {
 	protos := mp.net.network.clients[mp.target].receiver.supportedProtocols
-	for _, proto := range protos {
-		if _, ok := oldProtos[proto]; !ok {
-			return true
-		}
-	}
-	return false
+	return protos[0]
 }
 
-func (nc *networkClient) NewMessageSender(ctx context.Context, p peer.ID, opts *bsnet.MessageSenderOpts) (bsnet.MessageSender, error) {
-	return &messagePasser{
+func (nc *networkClient[MessageType]) NewMessageSender(ctx context.Context, p peer.ID, opts *protocolnetwork.MessageSenderOpts) (protocolnetwork.MessageSender[MessageType], error) {
+	return &messagePasser[MessageType]{
 		net:    nc,
 		target: p,
 		local:  nc.local,
@@ -320,19 +294,14 @@ func (nc *networkClient) NewMessageSender(ctx context.Context, p peer.ID, opts *
 	}, nil
 }
 
-// Provide provides the key to the network.
-func (nc *networkClient) Provide(ctx context.Context, k cid.Cid) error {
-	return nc.routing.Provide(ctx, k, true)
-}
-
-func (nc *networkClient) Start(r ...bsnet.Receiver) {
+func (nc *networkClient[MessageType]) Start(r ...protocolnetwork.Receiver[MessageType]) {
 	nc.receivers = r
 }
 
-func (nc *networkClient) Stop() {
+func (nc *networkClient[MessageType]) Stop() {
 }
 
-func (nc *networkClient) ConnectTo(_ context.Context, p peer.ID) error {
+func (nc *networkClient[MessageType]) ConnectTo(_ context.Context, p peer.ID) error {
 	nc.network.mu.Lock()
 	otherClient, ok := nc.network.clients[p]
 	if !ok {
@@ -354,7 +323,7 @@ func (nc *networkClient) ConnectTo(_ context.Context, p peer.ID) error {
 	return nil
 }
 
-func (nc *networkClient) DisconnectFrom(_ context.Context, p peer.ID) error {
+func (nc *networkClient[MessageType]) DisconnectFrom(_ context.Context, p peer.ID) error {
 	nc.network.mu.Lock()
 	defer nc.network.mu.Unlock()
 
@@ -375,7 +344,7 @@ func (nc *networkClient) DisconnectFrom(_ context.Context, p peer.ID) error {
 	return nil
 }
 
-func (rq *receiverQueue) enqueue(m *message) {
+func (rq *receiverQueue[MessageType]) enqueue(m *message[MessageType]) {
 	rq.lk.Lock()
 	defer rq.lk.Unlock()
 	rq.queue = append(rq.queue, m)
@@ -385,19 +354,19 @@ func (rq *receiverQueue) enqueue(m *message) {
 	}
 }
 
-func (rq *receiverQueue) Swap(i, j int) {
+func (rq *receiverQueue[MessageType]) Swap(i, j int) {
 	rq.queue[i], rq.queue[j] = rq.queue[j], rq.queue[i]
 }
 
-func (rq *receiverQueue) Len() int {
+func (rq *receiverQueue[MessageType]) Len() int {
 	return len(rq.queue)
 }
 
-func (rq *receiverQueue) Less(i, j int) bool {
+func (rq *receiverQueue[MessageType]) Less(i, j int) bool {
 	return rq.queue[i].shouldSend.UnixNano() < rq.queue[j].shouldSend.UnixNano()
 }
 
-func (rq *receiverQueue) process() {
+func (rq *receiverQueue[MessageType]) process() {
 	for {
 		rq.lk.Lock()
 		sort.Sort(rq)

@@ -14,6 +14,7 @@ import (
 	pool "github.com/libp2p/go-buffer-pool"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
+	protocol "github.com/libp2p/go-libp2p/core/protocol"
 	"github.com/libp2p/go-msgio"
 	"google.golang.org/protobuf/proto"
 )
@@ -28,6 +29,13 @@ func (m *Message) SendTimeout() time.Duration {
 }
 
 func (m *Message) Log(logger *logging.ZapEventLogger, eventName string) {
+}
+
+func (m *Message) Clone() *Message {
+	return &Message{
+		Id:      m.Id,
+		Payload: m.Payload,
+	}
 }
 
 type ProtoMessageHandler struct{}
@@ -150,3 +158,8 @@ func (mh *IPLDMessageHandler) fromIPLD(ibm *ipldbind.Message) (*Message, error) 
 		Payload: ibm.Payload,
 	}, nil
 }
+
+const ProtocolMockV1 = protocol.ID("/mock/v1")
+const ProtocolMockV2 = protocol.ID("/mock/v2")
+
+var DefaultProtocols = []protocol.ID{ProtocolMockV2, ProtocolMockV1}

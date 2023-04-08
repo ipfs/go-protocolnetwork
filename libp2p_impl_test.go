@@ -19,18 +19,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-const ProtocolMockV1 = protocol.ID("/mock/v1")
-const ProtocolMockV2 = protocol.ID("/mock/v2")
-
-var DefaultProtocols = []protocol.ID{ProtocolMockV2, ProtocolMockV1}
-
 type MessageHandlerSelector struct {
 	v1Handler testutil.ProtoMessageHandler
 	v2Handler testutil.IPLDMessageHandler
 }
 
 func (mhs *MessageHandlerSelector) Select(proto protocol.ID) pn.MessageHandler[*testutil.Message] {
-	if proto == ProtocolMockV1 {
+	if proto == testutil.ProtocolMockV1 {
 		return &mhs.v1Handler
 	}
 	return &mhs.v2Handler
@@ -179,7 +174,7 @@ func newNetwork(mn mocknet.Mocknet, p tnet.Identity) pn.ProtocolNetwork[*testuti
 	if err != nil {
 		panic(err.Error())
 	}
-	return pn.NewFromLibp2pHost[*testutil.Message]("mock", client, &MessageHandlerSelector{}, pn.SupportedProtocols(DefaultProtocols))
+	return pn.NewFromLibp2pHost[*testutil.Message]("mock", client, &MessageHandlerSelector{}, pn.SupportedProtocols(testutil.DefaultProtocols))
 
 }
 func TestMessageSendAndReceive(t *testing.T) {
@@ -259,7 +254,7 @@ func prepareNetwork(t *testing.T, ctx context.Context, p1 tnet.Identity, r1 *rec
 		t.Fatal(err)
 	}
 	eh1 := &ErrHost{Host: h1}
-	pn1 := pn.NewFromLibp2pHost[*testutil.Message]("mock", eh1, &MessageHandlerSelector{}, pn.SupportedProtocols(DefaultProtocols))
+	pn1 := pn.NewFromLibp2pHost[*testutil.Message]("mock", eh1, &MessageHandlerSelector{}, pn.SupportedProtocols(testutil.DefaultProtocols))
 	pn1.Start(r1)
 	t.Cleanup(pn1.Stop)
 	if r1.listener != nil {
@@ -272,7 +267,7 @@ func prepareNetwork(t *testing.T, ctx context.Context, p1 tnet.Identity, r1 *rec
 		t.Fatal(err)
 	}
 	eh2 := &ErrHost{Host: h2}
-	pn2 := pn.NewFromLibp2pHost[*testutil.Message]("mock", eh2, &MessageHandlerSelector{}, pn.SupportedProtocols(DefaultProtocols))
+	pn2 := pn.NewFromLibp2pHost[*testutil.Message]("mock", eh2, &MessageHandlerSelector{}, pn.SupportedProtocols(testutil.DefaultProtocols))
 	pn2.Start(r2)
 	t.Cleanup(pn2.Stop)
 	if r2.listener != nil {
@@ -519,7 +514,7 @@ func testNetworkCounters(t *testing.T, n1 int, n2 int) {
 					continue
 				}
 				pid := s.Protocol()
-				for _, v := range DefaultProtocols {
+				for _, v := range testutil.DefaultProtocols {
 					if pid == v {
 						goto ElseH1
 					}
@@ -550,7 +545,7 @@ func testNetworkCounters(t *testing.T, n1 int, n2 int) {
 					continue
 				}
 				pid := s.Protocol()
-				for _, v := range DefaultProtocols {
+				for _, v := range testutil.DefaultProtocols {
 					if pid == v {
 						goto ElseH2
 					}

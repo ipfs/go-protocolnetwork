@@ -3,6 +3,7 @@ module github.com/ipfs/go-protocolnetwork
 go 1.19
 
 require (
+	github.com/ipfs/go-ipfs-delay v0.0.1
 	github.com/ipfs/go-log/v2 v2.5.1
 	github.com/ipld/go-ipld-prime v0.20.0
 	github.com/libp2p/go-buffer-pool v0.1.0
