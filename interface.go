@@ -38,6 +38,15 @@ type ProtocolNetwork[MessageType Message] interface {
 	NewMessageSender(context.Context, peer.ID, *MessageSenderOpts) (MessageSender[MessageType], error)
 
 	Stats() Stats
+	ConnectionManager() ConnManager
+}
+
+// ConnManager provides the methods needed to protect and unprotect connections
+type ConnManager interface {
+	TagPeer(peer.ID, string, int)
+	UntagPeer(p peer.ID, tag string)
+	Protect(peer.ID, string)
+	Unprotect(peer.ID, string) bool
 }
 
 type MessageHandlerSelector[MessageType Message] interface {
@@ -74,7 +83,7 @@ type Receiver[MessageType Message] interface {
 		sender peer.ID,
 		incoming MessageType)
 
-	ReceiveError(error)
+	ReceiveError(peer.ID, error)
 
 	// Connected/Disconnected warns bitswap about peer connections.
 	PeerConnected(peer.ID)

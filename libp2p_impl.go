@@ -319,17 +319,21 @@ func (pn *libp2pProtocolNetwork[MessageType]) Start(r ...Receiver[MessageType]) 
 
 }
 
-func (bsnet *libp2pProtocolNetwork[MessageType]) Stop() {
-	bsnet.connectEvtMgr.Stop()
-	bsnet.host.Network().StopNotify((*netNotifiee[MessageType])(bsnet))
+func (pn *libp2pProtocolNetwork[MessageType]) Stop() {
+	pn.connectEvtMgr.Stop()
+	pn.host.Network().StopNotify((*netNotifiee[MessageType])(pn))
 }
 
-func (bsnet *libp2pProtocolNetwork[MessageType]) ConnectTo(ctx context.Context, p peer.ID) error {
-	return bsnet.host.Connect(ctx, peer.AddrInfo{ID: p})
+func (pn *libp2pProtocolNetwork[MessageType]) ConnectTo(ctx context.Context, p peer.ID) error {
+	return pn.host.Connect(ctx, peer.AddrInfo{ID: p})
 }
 
-func (bsnet *libp2pProtocolNetwork[MessageType]) DisconnectFrom(ctx context.Context, p peer.ID) error {
-	return bsnet.host.Network().ClosePeer(p)
+func (pn *libp2pProtocolNetwork[MessageType]) DisconnectFrom(ctx context.Context, p peer.ID) error {
+	return pn.host.Network().ClosePeer(p)
+}
+
+func (pn *libp2pProtocolNetwork[MessageType]) ConnectionManager() ConnManager {
+	return pn.host.ConnManager()
 }
 
 // handleNewStream receives a new stream from the network.
@@ -350,7 +354,7 @@ func (pn *libp2pProtocolNetwork[MessageType]) handleNewStream(s network.Stream) 
 				_ = s.Reset()
 				go func() {
 					for _, v := range pn.receivers {
-						v.ReceiveError(err)
+						v.ReceiveError(s.Conn().RemotePeer(), err)
 					}
 				}()
 				pn.log.Debugf("bitswap net handleNewStream from %s error: %s", s.Conn().RemotePeer(), err)
