@@ -6,8 +6,8 @@ import (
 	"testing"
 
 	delay "github.com/ipfs/go-ipfs-delay"
-	"github.com/ipfs/go-protocolnetwork"
 	"github.com/ipfs/go-protocolnetwork/internal/testutil"
+	"github.com/ipfs/go-protocolnetwork/pkg/network"
 	"github.com/stretchr/testify/require"
 
 	tnet "github.com/libp2p/go-libp2p-testing/net"
@@ -68,7 +68,7 @@ type receiverFunc func(ctx context.Context, p peer.ID,
 	incoming *testutil.Message)
 
 // lambda returns a Receiver instance given a receiver function
-func lambda(f receiverFunc) protocolnetwork.Receiver[*testutil.Message] {
+func lambda(f receiverFunc) network.Receiver[*testutil.Message] {
 	return &lambdaImpl{
 		f: f,
 	}

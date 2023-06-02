@@ -1,4 +1,4 @@
-package protocolnetwork_test
+package network_test
 
 import (
 	"context"
@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	pn "github.com/ipfs/go-protocolnetwork"
 	"github.com/ipfs/go-protocolnetwork/internal/testutil"
+	pn "github.com/ipfs/go-protocolnetwork/pkg/network"
 	tnet "github.com/libp2p/go-libp2p-testing/net"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"

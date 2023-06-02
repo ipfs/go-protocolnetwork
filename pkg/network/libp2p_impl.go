@@ -1,4 +1,4 @@
-package protocolnetwork
+package network
 
 import (
 	"context"

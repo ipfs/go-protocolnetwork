@@ -10,7 +10,7 @@ import (
 	"time"
 
 	delay "github.com/ipfs/go-ipfs-delay"
-	"github.com/ipfs/go-protocolnetwork"
+	"github.com/ipfs/go-protocolnetwork/pkg/network"
 
 	tnet "github.com/libp2p/go-libp2p-testing/net"
 	"github.com/libp2p/go-libp2p/core/connmgr"
@@ -23,12 +23,12 @@ import (
 
 // VirtualNetwork generates a new testnet instance - a fake network that
 // is used to simulate sending messages.
-func VirtualNetwork[MessageType protocolnetwork.Message[MessageType]](
+func VirtualNetwork[MessageType network.Message[MessageType]](
 	d delay.D,
 	supportedProtocols []protocol.ID,
-	handler protocolnetwork.MessageHandler[MessageType],
+	handler network.MessageHandler[MessageType],
 ) Network[MessageType] {
-	return &network[MessageType]{
+	return &virtualnetwork[MessageType]{
 		latencies:          make(map[peer.ID]map[peer.ID]time.Duration),
 		clients:            make(map[peer.ID]*receiverQueue[MessageType]),
 		delay:              d,
@@ -47,13 +47,13 @@ type RateLimitGenerator interface {
 
 // RateLimitedVirtualNetwork generates a testnet instance where nodes are rate
 // limited in the upload/download speed.
-func RateLimitedVirtualNetwork[MessageType protocolnetwork.Message[MessageType]](
+func RateLimitedVirtualNetwork[MessageType network.Message[MessageType]](
 	d delay.D,
 	rateLimitGenerator RateLimitGenerator,
 	supportedProtocols []protocol.ID,
-	handler protocolnetwork.MessageHandler[MessageType],
+	handler network.MessageHandler[MessageType],
 ) Network[MessageType] {
-	return &network[MessageType]{
+	return &virtualnetwork[MessageType]{
 		latencies:          make(map[peer.ID]map[peer.ID]time.Duration),
 		rateLimiters:       make(map[peer.ID]map[peer.ID]*mocknet.RateLimiter),
 		clients:            make(map[peer.ID]*receiverQueue[MessageType]),
@@ -66,7 +66,7 @@ func RateLimitedVirtualNetwork[MessageType protocolnetwork.Message[MessageType]]
 	}
 }
 
-type network[MessageType protocolnetwork.Message[MessageType]] struct {
+type virtualnetwork[MessageType network.Message[MessageType]] struct {
 	mu                 sync.Mutex
 	latencies          map[peer.ID]map[peer.ID]time.Duration
 	rateLimiters       map[peer.ID]map[peer.ID]*mocknet.RateLimiter
@@ -76,10 +76,10 @@ type network[MessageType protocolnetwork.Message[MessageType]] struct {
 	rateLimitGenerator RateLimitGenerator
 	conns              map[string]struct{}
 	supportedProtocols []protocol.ID
-	handler            protocolnetwork.MessageHandler[MessageType]
+	handler            network.MessageHandler[MessageType]
 }
 
-type message[MessageType protocolnetwork.Message[MessageType]] struct {
+type message[MessageType network.Message[MessageType]] struct {
 	from       peer.ID
 	msg        MessageType
 	shouldSend time.Time
@@ -88,18 +88,18 @@ type message[MessageType protocolnetwork.Message[MessageType]] struct {
 // receiverQueue queues up a set of messages to be sent, and sends them *in
 // order* with their delays respected as much as sending them in order allows
 // for
-type receiverQueue[MessageType protocolnetwork.Message[MessageType]] struct {
+type receiverQueue[MessageType network.Message[MessageType]] struct {
 	receiver *networkClient[MessageType]
 	queue    []*message[MessageType]
 	active   bool
 	lk       sync.Mutex
 }
 
-func (n *network[MessageType]) Adapter(p tnet.Identity, opts ...protocolnetwork.NetOpt) protocolnetwork.ProtocolNetwork[MessageType] {
+func (n *virtualnetwork[MessageType]) Adapter(p tnet.Identity, opts ...network.NetOpt) network.ProtocolNetwork[MessageType] {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 
-	s := protocolnetwork.Settings{
+	s := network.Settings{
 		SupportedProtocols: n.supportedProtocols,
 	}
 	for _, opt := range opts {
@@ -115,7 +115,7 @@ func (n *network[MessageType]) Adapter(p tnet.Identity, opts ...protocolnetwork.
 	return client
 }
 
-func (n *network[MessageType]) HasPeer(p peer.ID) bool {
+func (n *virtualnetwork[MessageType]) HasPeer(p peer.ID) bool {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 
@@ -125,7 +125,7 @@ func (n *network[MessageType]) HasPeer(p peer.ID) bool {
 
 // TODO should this be completely asynchronous?
 // TODO what does the network layer do with errors received from services?
-func (n *network[MessageType]) SendMessage(
+func (n *virtualnetwork[MessageType]) SendMessage(
 	ctx context.Context,
 	from peer.ID,
 	to peer.ID,
@@ -191,13 +191,13 @@ func (n *network[MessageType]) SendMessage(
 	return nil
 }
 
-type networkClient[MessageType protocolnetwork.Message[MessageType]] struct {
+type networkClient[MessageType network.Message[MessageType]] struct {
 	// These need to be at the top of the struct (allocated on the heap) for alignment on 32bit platforms.
-	stats protocolnetwork.Stats
+	stats network.Stats
 
 	local              peer.ID
-	receivers          []protocolnetwork.Receiver[MessageType]
-	network            *network[MessageType]
+	receivers          []network.Receiver[MessageType]
+	network            *virtualnetwork[MessageType]
 	routing            routing.Routing
 	supportedProtocols []protocol.ID
 }
@@ -250,18 +250,18 @@ func (nc *networkClient[MessageType]) SendMessage(
 	return nil
 }
 
-func (nc *networkClient[MessageType]) Stats() protocolnetwork.Stats {
-	return protocolnetwork.Stats{
+func (nc *networkClient[MessageType]) Stats() network.Stats {
+	return network.Stats{
 		MessagesRecvd: atomic.LoadUint64(&nc.stats.MessagesRecvd),
 		MessagesSent:  atomic.LoadUint64(&nc.stats.MessagesSent),
 	}
 }
 
-func (nc *networkClient[MessageType]) ConnectionManager() protocolnetwork.ConnManager {
+func (nc *networkClient[MessageType]) ConnectionManager() network.ConnManager {
 	return &connmgr.NullConnMgr{}
 }
 
-type messagePasser[MessageType protocolnetwork.Message[MessageType]] struct {
+type messagePasser[MessageType network.Message[MessageType]] struct {
 	net    *networkClient[MessageType]
 	target peer.ID
 	local  peer.ID
@@ -285,7 +285,7 @@ func (mp *messagePasser[MessageType]) Protocol() protocol.ID {
 	return protos[0]
 }
 
-func (nc *networkClient[MessageType]) NewMessageSender(ctx context.Context, p peer.ID, opts *protocolnetwork.MessageSenderOpts) (protocolnetwork.MessageSender[MessageType], error) {
+func (nc *networkClient[MessageType]) NewMessageSender(ctx context.Context, p peer.ID, opts *network.MessageSenderOpts) (network.MessageSender[MessageType], error) {
 	return &messagePasser[MessageType]{
 		net:    nc,
 		target: p,
@@ -294,7 +294,7 @@ func (nc *networkClient[MessageType]) NewMessageSender(ctx context.Context, p pe
 	}, nil
 }
 
-func (nc *networkClient[MessageType]) Start(r ...protocolnetwork.Receiver[MessageType]) {
+func (nc *networkClient[MessageType]) Start(r ...network.Receiver[MessageType]) {
 	nc.receivers = r
 }
 
