@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ipfs/go-graphsync/notifications"
-	"github.com/ipfs/go-graphsync/testutil"
+	"github.com/ipfs/go-protocolnetwork/internal/testutil"
+	"github.com/ipfs/go-protocolnetwork/pkg/notifications"
 )
 
 func TestSubscribeWithData(t *testing.T) {

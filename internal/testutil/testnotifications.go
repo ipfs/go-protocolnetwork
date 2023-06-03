@@ -7,7 +7,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/ipfs/go-graphsync/notifications"
+	"github.com/ipfs/go-protocolnetwork/pkg/notifications"
 )
 
 type TestSubscriber struct {
