@@ -18,36 +18,36 @@ const (
 	shutdown
 )
 
-type cmd struct {
+type cmd[Topic comparable, Event any] struct {
 	op     operation
 	topics []Topic
-	sub    Subscriber
+	sub    Subscriber[Topic, Event]
 	msg    Event
 }
 
 // publisher is a publisher of events for
-type publisher struct {
+type publisher[Topic comparable, Event any] struct {
 	lk     sync.RWMutex
 	closed chan struct{}
-	cmds   []cmd
+	cmds   []cmd[Topic, Event]
 	cmdsLk *sync.Cond
 }
 
 // NewPublisher returns a new message event publisher
-func NewPublisher() Publisher {
-	ps := &publisher{
+func NewPublisher[Topic comparable, Event any]() Publisher[Topic, Event] {
+	ps := &publisher[Topic, Event]{
 		cmdsLk: sync.NewCond(&sync.Mutex{}),
 		closed: make(chan struct{}),
 	}
 	return ps
 }
 
-func (ps *publisher) Startup() {
+func (ps *publisher[Topic, Event]) Startup() {
 	go ps.start()
 }
 
 // Publish publishes an event for the given message id
-func (ps *publisher) Publish(topic Topic, event Event) {
+func (ps *publisher[Topic, Event]) Publish(topic Topic, event Event) {
 	ps.lk.RLock()
 	defer ps.lk.RUnlock()
 	select {
@@ -56,11 +56,11 @@ func (ps *publisher) Publish(topic Topic, event Event) {
 	default:
 	}
 
-	ps.queue(cmd{op: pub, topics: []Topic{topic}, msg: event})
+	ps.queue(cmd[Topic, Event]{op: pub, topics: []Topic{topic}, msg: event})
 }
 
 // Shutdown shuts down all events and subscriptions
-func (ps *publisher) Shutdown() {
+func (ps *publisher[Topic, Event]) Shutdown() {
 	ps.lk.Lock()
 	defer ps.lk.Unlock()
 	select {
@@ -69,10 +69,10 @@ func (ps *publisher) Shutdown() {
 	default:
 	}
 	close(ps.closed)
-	ps.queue(cmd{op: shutdown})
+	ps.queue(cmd[Topic, Event]{op: shutdown})
 }
 
-func (ps *publisher) Close(id Topic) {
+func (ps *publisher[Topic, Event]) Close(id Topic) {
 	ps.lk.RLock()
 	defer ps.lk.RUnlock()
 	select {
@@ -80,10 +80,10 @@ func (ps *publisher) Close(id Topic) {
 		return
 	default:
 	}
-	ps.queue(cmd{op: closeTopic, topics: []Topic{id}})
+	ps.queue(cmd[Topic, Event]{op: closeTopic, topics: []Topic{id}})
 }
 
-func (ps *publisher) Subscribe(topic Topic, sub Subscriber) bool {
+func (ps *publisher[Topic, Event]) Subscribe(topic Topic, sub Subscriber[Topic, Event]) bool {
 	ps.lk.RLock()
 	defer ps.lk.RUnlock()
 
@@ -93,11 +93,11 @@ func (ps *publisher) Subscribe(topic Topic, sub Subscriber) bool {
 	default:
 	}
 
-	ps.queue(cmd{op: subscribe, topics: []Topic{topic}, sub: sub})
+	ps.queue(cmd[Topic, Event]{op: subscribe, topics: []Topic{topic}, sub: sub})
 	return true
 }
 
-func (ps *publisher) Unsubscribe(sub Subscriber) bool {
+func (ps *publisher[Topic, Event]) Unsubscribe(sub Subscriber[Topic, Event]) bool {
 	ps.lk.RLock()
 	defer ps.lk.RUnlock()
 
@@ -107,14 +107,14 @@ func (ps *publisher) Unsubscribe(sub Subscriber) bool {
 	default:
 	}
 
-	ps.queue(cmd{op: unsubAll, sub: sub})
+	ps.queue(cmd[Topic, Event]{op: unsubAll, sub: sub})
 	return true
 }
 
-func (ps *publisher) start() {
-	reg := subscriberRegistry{
-		topics:    make(map[Topic]map[Subscriber]struct{}),
-		revTopics: make(map[Subscriber]map[Topic]struct{}),
+func (ps *publisher[Topic, Event]) start() {
+	reg := subscriberRegistry[Topic, Event]{
+		topics:    make(map[Topic]map[Subscriber[Topic, Event]]struct{}),
+		revTopics: make(map[Subscriber[Topic, Event]]map[Topic]struct{}),
 	}
 
 loop:
@@ -153,14 +153,14 @@ loop:
 	}
 }
 
-type subscriberRegistry struct {
-	topics    map[Topic]map[Subscriber]struct{}
-	revTopics map[Subscriber]map[Topic]struct{}
+type subscriberRegistry[Topic comparable, Event any] struct {
+	topics    map[Topic]map[Subscriber[Topic, Event]]struct{}
+	revTopics map[Subscriber[Topic, Event]]map[Topic]struct{}
 }
 
-func (reg *subscriberRegistry) add(topic Topic, sub Subscriber) {
+func (reg *subscriberRegistry[Topic, Event]) add(topic Topic, sub Subscriber[Topic, Event]) {
 	if reg.topics[topic] == nil {
-		reg.topics[topic] = make(map[Subscriber]struct{})
+		reg.topics[topic] = make(map[Subscriber[Topic, Event]]struct{})
 	}
 	reg.topics[topic][sub] = struct{}{}
 
@@ -170,25 +170,25 @@ func (reg *subscriberRegistry) add(topic Topic, sub Subscriber) {
 	reg.revTopics[sub][topic] = struct{}{}
 }
 
-func (reg *subscriberRegistry) send(topic Topic, msg Event) {
+func (reg *subscriberRegistry[Topic, Event]) send(topic Topic, msg Event) {
 	for sub := range reg.topics[topic] {
 		sub.OnNext(topic, msg)
 	}
 }
 
-func (reg *subscriberRegistry) removeTopic(topic Topic) {
+func (reg *subscriberRegistry[Topic, Event]) removeTopic(topic Topic) {
 	for sub := range reg.topics[topic] {
 		reg.remove(topic, sub)
 	}
 }
 
-func (reg *subscriberRegistry) removeSubscriber(sub Subscriber) {
+func (reg *subscriberRegistry[Topic, Event]) removeSubscriber(sub Subscriber[Topic, Event]) {
 	for topic := range reg.revTopics[sub] {
 		reg.remove(topic, sub)
 	}
 }
 
-func (reg *subscriberRegistry) remove(topic Topic, sub Subscriber) {
+func (reg *subscriberRegistry[Topic, Event]) remove(topic Topic, sub Subscriber[Topic, Event]) {
 	if _, ok := reg.topics[topic]; !ok {
 		return
 	}
@@ -211,7 +211,7 @@ func (reg *subscriberRegistry) remove(topic Topic, sub Subscriber) {
 	sub.OnClose(topic)
 }
 
-func (ps *publisher) queue(cmd cmd) {
+func (ps *publisher[Topic, Event]) queue(cmd cmd[Topic, Event]) {
 	ps.cmdsLk.L.Lock()
 	ps.cmds = append(ps.cmds, cmd)
 	cmdsLen := len(ps.cmds)
@@ -220,7 +220,7 @@ func (ps *publisher) queue(cmd cmd) {
 	ps.cmdsLk.Signal()
 }
 
-func (ps *publisher) dequeue() cmd {
+func (ps *publisher[Topic, Event]) dequeue() cmd[Topic, Event] {
 	ps.cmdsLk.L.Lock()
 	for len(ps.cmds) == 0 {
 		ps.cmdsLk.Wait()
