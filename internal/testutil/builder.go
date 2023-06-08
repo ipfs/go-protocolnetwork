@@ -65,7 +65,7 @@ func (bc *MessageBuilder) NextMessage() (messagequeue.MessageSpec[*Message], boo
 	if builder.Empty() {
 		return nil, false, errors.New("Message empty")
 	}
-	return builder, false, nil
+	return builder.Build, false, nil
 }
 
 func (bc *MessageBuilder) Notifier(id []byte) *Notifier {

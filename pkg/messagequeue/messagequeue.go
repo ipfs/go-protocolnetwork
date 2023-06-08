@@ -28,9 +28,7 @@ type Notifier interface {
 	HandleFinished()
 }
 
-type MessageSpec[MessageType network.Message[MessageType]] interface {
-	Build() (MessageType, Notifier, error)
-}
+type MessageSpec[MessageType network.Message[MessageType]] func() (MessageType, Notifier, error)
 
 type MessageBuilder[MessageType network.Message[MessageType], BuildParams any] interface {
 	BuildMessage(BuildParams) bool
@@ -160,7 +158,7 @@ func (mq *MessageQueue[MessageType, BuildParams]) extractOutgoingMessage() (Mess
 		var emptyMessage MessageType
 		return emptyMessage, nil, err
 	}
-	return spec.Build()
+	return spec()
 }
 
 func (mq *MessageQueue[MessageType, BuildParams]) sendMessage() {
