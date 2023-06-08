@@ -115,7 +115,7 @@ func (mq *MessageQueue[MessageType, BuildParams]) runQueue() {
 				for {
 					_, notifier, err := mq.extractOutgoingMessage()
 					if err == nil {
-						notifier.HandleError(err)
+						notifier.HandleError(fmt.Errorf("message queue shutdown"))
 						notifier.HandleFinished()
 					} else {
 						break
