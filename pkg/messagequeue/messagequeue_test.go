@@ -27,15 +27,15 @@ func TestStartupAndShutdown(t *testing.T) {
 	messageSender := &fakeMessageSender{nil, fullClosedChan, resetChan, messagesSent}
 	var waitGroup sync.WaitGroup
 	messageNetwork := &fakeMessageNetwork{nil, nil, messageSender, &waitGroup}
-	bc := testutil.NewBuilderCollection()
+	bc := testutil.NewMessageBuilder()
 
-	messageQueue := messagequeue.New[*testutil.Message, *testutil.Builder, int](ctx, peer, messageNetwork, bc, messageSenderOpts, nil)
+	messageQueue := messagequeue.New[*testutil.Message, func(*testutil.SingleBuilder)](ctx, peer, messageNetwork, bc, messageSenderOpts, nil, nil)
 	messageQueue.Startup()
 
 	id := testutil.RandomBytes(100)
 	payload := testutil.RandomBytes(100)
 	waitGroup.Add(1)
-	messageQueue.AllocateAndBuildMessage(0, func(b *testutil.Builder) {
+	messageQueue.BuildMessage(func(b *testutil.SingleBuilder) {
 		b.SetID(id)
 		b.SetPayload(payload)
 	})
@@ -63,16 +63,16 @@ func TestShutdownDuringMessageSend(t *testing.T) {
 		messagesSent}
 	var waitGroup sync.WaitGroup
 	messageNetwork := &fakeMessageNetwork{nil, nil, messageSender, &waitGroup}
-	bc := testutil.NewBuilderCollection()
+	bc := testutil.NewMessageBuilder()
 
-	messageQueue := messagequeue.New[*testutil.Message, *testutil.Builder, int](ctx, peer, messageNetwork, bc, messageSenderOpts, nil)
+	messageQueue := messagequeue.New[*testutil.Message, func(*testutil.SingleBuilder)](ctx, peer, messageNetwork, bc, messageSenderOpts, nil, nil)
 	messageQueue.Startup()
 	id := testutil.RandomBytes(100)
 	payload := testutil.RandomBytes(100)
 
 	// setup a message and advance as far as beginning to send it
 	waitGroup.Add(1)
-	messageQueue.AllocateAndBuildMessage(0, func(b *testutil.Builder) {
+	messageQueue.BuildMessage(func(b *testutil.SingleBuilder) {
 		b.SetID(id)
 		b.SetPayload(payload)
 	})
@@ -109,15 +109,15 @@ func TestProcessingNotification(t *testing.T) {
 	messageSender := &fakeMessageSender{nil, fullClosedChan, resetChan, messagesSent}
 	var waitGroup sync.WaitGroup
 	messageNetwork := &fakeMessageNetwork{nil, nil, messageSender, &waitGroup}
-	bc := testutil.NewBuilderCollection()
+	bc := testutil.NewMessageBuilder()
 
-	messageQueue := messagequeue.New[*testutil.Message, *testutil.Builder, int](ctx, peer, messageNetwork, bc, messageSenderOpts, nil)
+	messageQueue := messagequeue.New[*testutil.Message, func(*testutil.SingleBuilder)](ctx, peer, messageNetwork, bc, messageSenderOpts, nil, nil)
 	messageQueue.Startup()
 	id := testutil.RandomBytes(100)
 	payload := testutil.RandomBytes(100)
 	waitGroup.Add(1)
 
-	messageQueue.AllocateAndBuildMessage(0, func(b *testutil.Builder) {
+	messageQueue.BuildMessage(func(b *testutil.SingleBuilder) {
 		b.SetID(id)
 		b.SetPayload(payload)
 	})

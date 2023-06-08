@@ -28,19 +28,17 @@ type Notifier interface {
 	HandleFinished()
 }
 
-type Builder[MessageType network.Message[MessageType]] interface {
+type MessageSpec[MessageType network.Message[MessageType]] interface {
 	Build() (MessageType, Notifier, error)
-	Empty() bool
 }
 
-type BuilderCollection[MessageType network.Message[MessageType], BuilderType Builder[MessageType], EstimateType any] interface {
-	NextBuilder(EstimateType) BuilderType
-	ExtractFirstBuilder() BuilderType
-	Empty() bool
+type MessageBuilder[MessageType network.Message[MessageType], BuildParams any] interface {
+	BuildMessage(BuildParams) bool
+	NextMessage() (MessageSpec[MessageType], bool, error)
 }
 
 // MessageQueue implements queue of want messages to send to peers.
-type MessageQueue[MessageType network.Message[MessageType], BuilderType Builder[MessageType], EstimateType any] struct {
+type MessageQueue[MessageType network.Message[MessageType], BuildParams any] struct {
 	p       peer.ID
 	network MessageNetwork[MessageType]
 	ctx     context.Context
@@ -51,67 +49,64 @@ type MessageQueue[MessageType network.Message[MessageType], BuilderType Builder[
 
 	// internal do not touch outside go routines
 	sender     network.MessageSender[MessageType]
-	buildersLk sync.RWMutex
-	builders   BuilderCollection[MessageType, BuilderType, EstimateType]
+	builder    MessageBuilder[MessageType, BuildParams]
+	onStartup  func()
 	onShutdown func()
 	opts       *network.MessageSenderOpts
 }
 
 // New creats a new MessageQueue.
-func New[MessageType network.Message[MessageType], BuilderType Builder[MessageType], EstimateType any](
+func New[MessageType network.Message[MessageType], BuildParams any](
 	ctx context.Context,
 	p peer.ID,
 	network MessageNetwork[MessageType],
-	builders BuilderCollection[MessageType, BuilderType, EstimateType],
+	builder MessageBuilder[MessageType, BuildParams],
 	opts *network.MessageSenderOpts,
-	onShutdown func()) *MessageQueue[MessageType, BuilderType, EstimateType] {
-	return &MessageQueue[MessageType, BuilderType, EstimateType]{
+	onStartup func(),
+	onShutdown func()) *MessageQueue[MessageType, BuildParams] {
+	return &MessageQueue[MessageType, BuildParams]{
 		ctx:          ctx,
 		network:      network,
 		p:            p,
-		builders:     builders,
+		builder:      builder,
 		outgoingWork: make(chan struct{}, 1),
 		done:         make(chan struct{}),
 		opts:         opts,
+		onStartup:    onStartup,
 		onShutdown:   onShutdown,
 	}
 }
 
 // AllocateAndBuildMessage allows you to work modify the next message that is sent in the queue.
 // If blkSize > 0, message building may block until enough memory has been freed from the queues to allocate the message.
-func (mq *MessageQueue[MessageType, BuilderType, EstimateType]) AllocateAndBuildMessage(size EstimateType, buildMessageFn func(BuilderType)) {
-	if mq.buildMessage(size, buildMessageFn) {
+func (mq *MessageQueue[MessageType, BuildParams]) BuildMessage(messageSpec BuildParams) {
+	if mq.builder.BuildMessage(messageSpec) {
 		mq.signalWork()
 	}
 }
 
-func (mq *MessageQueue[MessageType, BuilderType, EstimateType]) buildMessage(size EstimateType, buildMessageFn func(BuilderType)) bool {
-	mq.buildersLk.Lock()
-	defer mq.buildersLk.Unlock()
-	builder := mq.builders.NextBuilder(size)
-	buildMessageFn(builder)
-	return !builder.Empty()
-}
-
 // Startup starts the processing of messages, and creates an initial message
 // based on the given initial wantlist.
-func (mq *MessageQueue[MessageType, BuilderType, EstimateType]) Startup() {
+func (mq *MessageQueue[MessageType, BuildParams]) Startup() {
 	go mq.runQueue()
 }
 
 // Shutdown stops the processing of messages for a message queue.
-func (mq *MessageQueue[MessageType, BuilderType, EstimateType]) Shutdown() {
+func (mq *MessageQueue[MessageType, BuildParams]) Shutdown() {
 	mq.doneOnce.Do(func() {
 		close(mq.done)
 	})
 }
 
-func (mq *MessageQueue[MessageType, BuilderType, EstimateType]) runQueue() {
+func (mq *MessageQueue[MessageType, BuildParams]) runQueue() {
 	defer func() {
 		if mq.onShutdown != nil {
 			mq.onShutdown()
 		}
 	}()
+	if mq.onStartup != nil {
+		mq.onStartup()
+	}
 	for {
 		select {
 		case <-mq.outgoingWork:
@@ -143,7 +138,7 @@ func (mq *MessageQueue[MessageType, BuilderType, EstimateType]) runQueue() {
 	}
 }
 
-func (mq *MessageQueue[MessageType, BuilderType, EstimateType]) signalWork() {
+func (mq *MessageQueue[MessageType, BuildParams]) signalWork() {
 	select {
 	case mq.outgoingWork <- struct{}{}:
 	default:
@@ -152,31 +147,23 @@ func (mq *MessageQueue[MessageType, BuilderType, EstimateType]) signalWork() {
 
 var errEmptyMessage = errors.New("empty Message")
 
-func (mq *MessageQueue[MessageType, BuilderType, EstimateType]) extractOutgoingMessage() (MessageType, Notifier, error) {
+func (mq *MessageQueue[MessageType, BuildParams]) extractOutgoingMessage() (MessageType, Notifier, error) {
 	// grab outgoing message
-	mq.buildersLk.Lock()
-	if mq.builders.Empty() {
-		mq.buildersLk.Unlock()
-		var emptyMessage MessageType
-		return emptyMessage, nil, errEmptyMessage
-	}
-	builder := mq.builders.ExtractFirstBuilder()
-	// if there are more queued messages, signal we still have more work
-	if !mq.builders.Empty() {
+	spec, hasMore, err := mq.builder.NextMessage()
+	if hasMore {
 		select {
 		case mq.outgoingWork <- struct{}{}:
 		default:
 		}
 	}
-	mq.buildersLk.Unlock()
-	if builder.Empty() {
+	if err != nil {
 		var emptyMessage MessageType
-		return emptyMessage, nil, errEmptyMessage
+		return emptyMessage, nil, err
 	}
-	return builder.Build()
+	return spec.Build()
 }
 
-func (mq *MessageQueue[MessageType, BuilderType, EstimateType]) sendMessage() {
+func (mq *MessageQueue[MessageType, BuildParams]) sendMessage() {
 	message, notifier, err := mq.extractOutgoingMessage()
 
 	if err != nil {
@@ -196,7 +183,6 @@ func (mq *MessageQueue[MessageType, BuilderType, EstimateType]) sendMessage() {
 		mq.Shutdown()
 		return
 	}
-
 	if err = mq.sender.SendMsg(mq.ctx, message); err != nil {
 		// If the message couldn't be sent, the networking layer will
 		// emit a Disconnect event and the MessageQueue will get cleaned up
@@ -209,7 +195,7 @@ func (mq *MessageQueue[MessageType, BuilderType, EstimateType]) sendMessage() {
 	notifier.HandleSent()
 }
 
-func (mq *MessageQueue[MessageType, BuilderType, EstimateType]) initializeSender() error {
+func (mq *MessageQueue[MessageType, BuildParams]) initializeSender() error {
 	if mq.sender != nil {
 		return nil
 	}

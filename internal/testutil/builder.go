@@ -2,64 +2,73 @@ package testutil
 
 import (
 	"errors"
+	"sync"
 
 	"github.com/ipfs/go-protocolnetwork/pkg/messagequeue"
 )
 
-type Builder struct {
+type SingleBuilder struct {
 	id          []byte
 	payload     []byte
 	newNotifier func(id []byte) *Notifier
 	notifier    *Notifier
 }
 
-func (b *Builder) Empty() bool {
+func (b *SingleBuilder) Empty() bool {
 	return b.id == nil
 }
-func (b *Builder) Build() (*Message, messagequeue.Notifier, error) {
+func (b *SingleBuilder) Build() (*Message, messagequeue.Notifier, error) {
 	if b.id == nil {
 		return nil, nil, errors.New("empty")
 	}
 	return &Message{Id: b.id, Payload: b.payload}, b.notifier, nil
 }
 
-func (b *Builder) SetID(id []byte) {
+func (b *SingleBuilder) SetID(id []byte) {
 	b.id = id
 	b.notifier = b.newNotifier(id)
 }
 
-func (b *Builder) SetPayload(payload []byte) {
+func (b *SingleBuilder) SetPayload(payload []byte) {
 	b.payload = payload
 }
 
-type BuilderCollection struct {
+type MessageBuilder struct {
 	notifiers map[string]*Notifier
-	builder   *Builder
+	builder   *SingleBuilder
+	builderLk sync.Mutex
 }
 
-func NewBuilderCollection() *BuilderCollection {
-	return &BuilderCollection{
+func NewMessageBuilder() *MessageBuilder {
+	return &MessageBuilder{
 		notifiers: make(map[string]*Notifier),
 	}
 }
-func (bc *BuilderCollection) NextBuilder(_ int) *Builder {
+func (bc *MessageBuilder) BuildMessage(op func(*SingleBuilder)) bool {
+	bc.builderLk.Lock()
+	defer bc.builderLk.Unlock()
 	if bc.builder == nil {
-		bc.builder = &Builder{newNotifier: bc.Notifier}
+		bc.builder = &SingleBuilder{newNotifier: bc.Notifier}
 	}
-	return bc.builder
+	op(bc.builder)
+	return !bc.builder.Empty()
 }
 
-func (bc *BuilderCollection) ExtractFirstBuilder() *Builder {
+func (bc *MessageBuilder) NextMessage() (messagequeue.MessageSpec[*Message], bool, error) {
+	bc.builderLk.Lock()
+	defer bc.builderLk.Unlock()
+	if bc.builder == nil {
+		return nil, false, errors.New("no messages")
+	}
 	builder := bc.builder
 	bc.builder = nil
-	return builder
+	if builder.Empty() {
+		return nil, false, errors.New("Message empty")
+	}
+	return builder, false, nil
 }
 
-func (bc *BuilderCollection) Empty() bool {
-	return bc.builder == nil
-}
-
-func (bc *BuilderCollection) Notifier(id []byte) *Notifier {
+func (bc *MessageBuilder) Notifier(id []byte) *Notifier {
 	n, ok := bc.notifiers[string(id)]
 	if !ok {
 		n = &Notifier{
