@@ -20,7 +20,7 @@ const (
 	stateUnresponsive
 )
 
-type connectEventManager struct {
+type ConnectEventManager struct {
 	connListeners []ConnectionListener
 	lk            sync.RWMutex
 	cond          sync.Cond
@@ -36,8 +36,8 @@ type peerState struct {
 	pending            bool
 }
 
-func newConnectEventManager(connListeners ...ConnectionListener) *connectEventManager {
-	evtManager := &connectEventManager{
+func NewConnectEventManager(connListeners ...ConnectionListener) *ConnectEventManager {
+	evtManager := &ConnectEventManager{
 		connListeners: connListeners,
 		peers:         make(map[peer.ID]*peerState),
 		done:          make(chan struct{}),
@@ -46,11 +46,11 @@ func newConnectEventManager(connListeners ...ConnectionListener) *connectEventMa
 	return evtManager
 }
 
-func (c *connectEventManager) Start() {
+func (c *ConnectEventManager) Start() {
 	go c.worker()
 }
 
-func (c *connectEventManager) Stop() {
+func (c *ConnectEventManager) Stop() {
 	c.lk.Lock()
 	c.stop = true
 	c.lk.Unlock()
@@ -59,7 +59,17 @@ func (c *connectEventManager) Stop() {
 	<-c.done
 }
 
-func (c *connectEventManager) getState(p peer.ID) state {
+func (c *ConnectEventManager) Empty() bool {
+	return len(c.peers) == 0
+}
+
+func (c *ConnectEventManager) AllChangesProcessed() bool {
+	c.lk.RLock()
+	defer c.lk.RUnlock()
+	return len(c.changeQueue) == 0
+}
+
+func (c *ConnectEventManager) getState(p peer.ID) state {
 	if state, ok := c.peers[p]; ok {
 		return state.newState
 	} else {
@@ -67,7 +77,7 @@ func (c *connectEventManager) getState(p peer.ID) state {
 	}
 }
 
-func (c *connectEventManager) setState(p peer.ID, newState state) {
+func (c *ConnectEventManager) setState(p peer.ID, newState state) {
 	state, ok := c.peers[p]
 	if !ok {
 		state = new(peerState)
@@ -83,14 +93,14 @@ func (c *connectEventManager) setState(p peer.ID, newState state) {
 
 // Waits for a change to be enqueued, or for the event manager to be stopped. Returns false if the
 // connect event manager has been stopped.
-func (c *connectEventManager) waitChange() bool {
+func (c *ConnectEventManager) waitChange() bool {
 	for !c.stop && len(c.changeQueue) == 0 {
 		c.cond.Wait()
 	}
 	return !c.stop
 }
 
-func (c *connectEventManager) worker() {
+func (c *ConnectEventManager) worker() {
 	c.lk.Lock()
 	defer c.lk.Unlock()
 	defer close(c.done)
@@ -147,7 +157,7 @@ func (c *connectEventManager) worker() {
 }
 
 // Called whenever we receive a new connection. May be called many times.
-func (c *connectEventManager) Connected(p peer.ID) {
+func (c *ConnectEventManager) Connected(p peer.ID) {
 	c.lk.Lock()
 	defer c.lk.Unlock()
 
@@ -160,7 +170,7 @@ func (c *connectEventManager) Connected(p peer.ID) {
 }
 
 // Called when we drop the final connection to a peer.
-func (c *connectEventManager) Disconnected(p peer.ID) {
+func (c *ConnectEventManager) Disconnected(p peer.ID) {
 	c.lk.Lock()
 	defer c.lk.Unlock()
 
@@ -174,7 +184,7 @@ func (c *connectEventManager) Disconnected(p peer.ID) {
 }
 
 // Called whenever a peer is unresponsive.
-func (c *connectEventManager) MarkUnresponsive(p peer.ID) {
+func (c *ConnectEventManager) MarkUnresponsive(p peer.ID) {
 	c.lk.Lock()
 	defer c.lk.Unlock()
 
@@ -193,7 +203,7 @@ func (c *connectEventManager) MarkUnresponsive(p peer.ID) {
 // - When not connected, we ignore this call. Unfortunately, a peer may disconnect before we process
 //
 //	the "on message" event, so we can't treat this as evidence of a connection.
-func (c *connectEventManager) OnMessage(p peer.ID) {
+func (c *ConnectEventManager) OnMessage(p peer.ID) {
 	c.lk.RLock()
 	unresponsive := c.getState(p) == stateUnresponsive
 	c.lk.RUnlock()

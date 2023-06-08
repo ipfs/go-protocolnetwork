@@ -6,7 +6,7 @@ import (
 	logging "github.com/ipfs/go-log/v2"
 )
 
-var log = logging.Logger("gs-notifications")
+var log = logging.Logger("protocolnetwork/notifications")
 
 type operation int
 

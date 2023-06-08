@@ -27,7 +27,7 @@ var minSendTimeout = 10 * time.Second
 var sendLatency = 2 * time.Second
 var minSendRate = (100 * 1000) / 8 // 100kbit/s
 
-// NewFromLibp2pHost returns a BitSwapNetwork supported by underlying IPFS host.
+// NewFromLibp2pHost returns a ProtocolNetwork supported by underlying IPFS host.
 func NewFromLibp2pHost[MessageType Message[MessageType]](
 	protocolName string,
 	host host.Host,
@@ -42,7 +42,7 @@ func NewFromLibp2pHost[MessageType Message[MessageType]](
 	}
 
 	return &libp2pProtocolNetwork[MessageType]{
-		log:                    logging.Logger(protocolName + "_network"),
+		log:                    logging.Logger("protocolnetwork/" + protocolName + "_network"),
 		protocolName:           protocolName,
 		host:                   host,
 		protocolPrefix:         s.ProtocolPrefix,
@@ -60,7 +60,7 @@ type libp2pProtocolNetwork[MessageType Message[MessageType]] struct {
 
 	host           host.Host
 	routing        routing.ContentRouting
-	connectEvtMgr  *connectEventManager
+	connectEvtMgr  *ConnectEventManager
 	protocolName   string
 	log            *logging.ZapEventLogger
 	protocolPrefix protocol.ID
@@ -309,7 +309,7 @@ func (pn *libp2pProtocolNetwork[MessageType]) Start(r ...Receiver[MessageType]) 
 		for i, v := range r {
 			connectionListeners[i] = v
 		}
-		pn.connectEvtMgr = newConnectEventManager(connectionListeners...)
+		pn.connectEvtMgr = NewConnectEventManager(connectionListeners...)
 	}
 	for _, proto := range pn.supportedProtocols {
 		pn.host.SetStreamHandler(proto, pn.handleNewStream)

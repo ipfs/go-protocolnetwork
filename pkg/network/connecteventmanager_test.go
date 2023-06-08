@@ -1,4 +1,4 @@
-package network
+package network_test
 
 import (
 	"sync"
@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/ipfs/go-protocolnetwork/internal/testutil"
+	"github.com/ipfs/go-protocolnetwork/pkg/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/stretchr/testify/require"
 )
@@ -36,12 +37,8 @@ func (cl *mockConnListener) PeerDisconnected(p peer.ID) {
 	cl.events = append(cl.events, mockConnEvent{connected: false, peer: p})
 }
 
-func wait(t *testing.T, c *connectEventManager) {
-	require.Eventually(t, func() bool {
-		c.lk.RLock()
-		defer c.lk.RUnlock()
-		return len(c.changeQueue) == 0
-	}, time.Second, time.Millisecond, "connection event manager never processed events")
+func wait(t *testing.T, c *network.ConnectEventManager) {
+	require.Eventually(t, c.AllChangesProcessed, time.Second, time.Millisecond, "connection event manager never processed events")
 }
 
 func TestConnectEventManagerConnectDisconnect(t *testing.T) {
@@ -49,7 +46,7 @@ func TestConnectEventManagerConnectDisconnect(t *testing.T) {
 
 	connListener := newMockConnListener()
 	peers := testutil.GeneratePeers(2)
-	cem := newConnectEventManager(connListener)
+	cem := network.NewConnectEventManager(connListener)
 	cem.Start()
 	t.Cleanup(cem.Stop)
 
@@ -90,7 +87,7 @@ func TestConnectEventManagerMarkUnresponsive(t *testing.T) {
 
 	connListener := newMockConnListener()
 	p := testutil.GeneratePeers(1)[0]
-	cem := newConnectEventManager(connListener)
+	cem := network.NewConnectEventManager(connListener)
 	cem.Start()
 	t.Cleanup(cem.Stop)
 
@@ -141,7 +138,7 @@ func TestConnectEventManagerDisconnectAfterMarkUnresponsive(t *testing.T) {
 
 	connListener := newMockConnListener()
 	p := testutil.GeneratePeers(1)[0]
-	cem := newConnectEventManager(connListener)
+	cem := network.NewConnectEventManager(connListener)
 	cem.Start()
 	t.Cleanup(cem.Stop)
 
@@ -169,6 +166,6 @@ func TestConnectEventManagerDisconnectAfterMarkUnresponsive(t *testing.T) {
 
 	cem.Disconnected(p)
 	wait(t, cem)
-	require.Empty(t, cem.peers) // all disconnected
+	require.Empty(t, cem.Empty()) // all disconnected
 	require.Equal(t, expectedEvents, connListener.events)
 }

@@ -12,9 +12,11 @@ require (
 	github.com/libp2p/go-msgio v0.3.0
 	github.com/multiformats/go-multiaddr v0.9.0
 	github.com/multiformats/go-multistream v0.4.1
-	github.com/stretchr/testify v1.8.2
+	github.com/stretchr/testify v1.8.3
 	google.golang.org/protobuf v1.30.0
 )
+
+require github.com/go-logr/logr v1.2.4 // indirect
 
 require (
 	github.com/benbjohnson/clock v1.3.0 // indirect
