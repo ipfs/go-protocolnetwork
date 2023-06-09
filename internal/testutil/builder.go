@@ -26,7 +26,9 @@ func (b *SingleBuilder) Build() (*Message, messagequeue.Notifier, error) {
 
 func (b *SingleBuilder) SetID(id []byte) {
 	b.id = id
-	b.notifier = b.newNotifier(id)
+	if b.newNotifier != nil {
+		b.notifier = b.newNotifier(id)
+	}
 }
 
 func (b *SingleBuilder) SetPayload(payload []byte) {

@@ -1,12 +1,12 @@
-package peermanager
+package peermanager_test
 
 import (
 	"context"
 	"testing"
 
+	"github.com/ipfs/go-protocolnetwork/internal/testutil"
+	"github.com/ipfs/go-protocolnetwork/pkg/peermanager"
 	"github.com/libp2p/go-libp2p/core/peer"
-
-	"github.com/ipfs/go-graphsync/testutil"
 )
 
 type fakePeerProcess struct {
@@ -17,13 +17,13 @@ func (fp *fakePeerProcess) Shutdown() {}
 
 func TestAddingAndRemovingPeers(t *testing.T) {
 	ctx := context.Background()
-	peerProcessFatory := func(ctx context.Context, p peer.ID, onShutdown func(peer.ID)) PeerHandler {
+	peerProcessFatory := func(ctx context.Context, p peer.ID, onShutdown func(peer.ID)) *fakePeerProcess {
 		return &fakePeerProcess{}
 	}
 
 	tp := testutil.GeneratePeers(5)
 	peer1, peer2, peer3, peer4, peer5 := tp[0], tp[1], tp[2], tp[3], tp[4]
-	peerManager := New(ctx, peerProcessFatory)
+	peerManager := peermanager.New(ctx, peerProcessFatory)
 
 	peerManager.Connected(peer1)
 	peerManager.Connected(peer2)
